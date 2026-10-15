@@ -27,6 +27,7 @@ public class MainActivity extends Activity {
  private boolean trusted(Uri uri){return "https".equals(uri.getScheme())&&"appassets.androidplatform.net".equals(uri.getHost())&&uri.getPort()==-1;}
  @Override public void onCreate(Bundle state){super.onCreate(state);
   web=new WebView(this);web.setBackgroundColor(Color.rgb(8,5,7));setContentView(web);
+  web.setOverScrollMode(View.OVER_SCROLL_NEVER);
   getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
   web.setOnApplyWindowInsetsListener((v,in)->{
    if(Build.VERSION.SDK_INT>=30){android.graphics.Insets nav=in.getInsets(WindowInsets.Type.navigationBars()|WindowInsets.Type.ime());android.graphics.Insets cut=in.getInsetsIgnoringVisibility(WindowInsets.Type.displayCutout());v.setPadding(Math.max(nav.left,cut.left),cut.top,Math.max(nav.right,cut.right),nav.bottom);}
@@ -48,7 +49,7 @@ public class MainActivity extends Activity {
   web.setWebChromeClient(new WebChromeClient(){@Override public boolean onShowFileChooser(WebView v,ValueCallback<Uri[]> callback,FileChooserParams params){if(fileCallback!=null)fileCallback.onReceiveValue(null);fileCallback=callback;Intent i=new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(i,41);return true;}catch(Exception e){fileCallback.onReceiveValue(null);fileCallback=null;return false;}}});
   IntentFilter f=new IntentFilter();f.addAction(Intent.ACTION_PACKAGE_ADDED);f.addAction(Intent.ACTION_PACKAGE_REMOVED);f.addAction(Intent.ACTION_PACKAGE_CHANGED);f.addDataScheme("package");
   if(Build.VERSION.SDK_INT>=33)registerReceiver(changes,f,Context.RECEIVER_EXPORTED);else registerReceiver(changes,f);receiverRegistered=true;
-  web.loadUrl("https://appassets.androidplatform.net/index.html");loadApps();
+  web.loadUrl("https://appassets.androidplatform.net/index.html");
  }
  private void push(){if(web!=null)web.evaluateJavascript("window.receiveApps&&window.receiveApps("+appJson+");window.homeState&&window.homeState("+isHome()+");",null);}
  private boolean isHome(){RoleManager r=getSystemService(RoleManager.class);return r!=null&&r.isRoleHeld(RoleManager.ROLE_HOME);}
@@ -56,7 +57,12 @@ public class MainActivity extends Activity {
   try{PackageManager pm=getPackageManager();Intent i=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
    List<ResolveInfo> list=pm.queryIntentActivities(i,0);list.sort((a,b)->String.CASE_INSENSITIVE_ORDER.compare(a.loadLabel(pm).toString(),b.loadLabel(pm).toString()));JSONArray array=new JSONArray();Set<String> seen=new HashSet<>();Map<String,ComponentName> next=new HashMap<>();
    for(ResolveInfo r:list){if(r.activityInfo==null||!r.activityInfo.exported||r.activityInfo.packageName.equals(getPackageName()))continue;ComponentName c=new ComponentName(r.activityInfo.packageName,r.activityInfo.name);String id=c.flattenToString();if(!seen.add(id))continue;JSONObject o=new JSONObject();o.put("id",id);o.put("name",r.loadLabel(pm).toString());
-    try{Drawable dr=r.loadIcon(pm);Bitmap bm=Bitmap.createBitmap(80,80,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bm);dr.setBounds(8,8,72,72);dr.draw(canvas);ByteArrayOutputStream out=new ByteArrayOutputStream();bm.compress(Bitmap.CompressFormat.PNG,100,out);o.put("icon","data:image/png;base64,"+android.util.Base64.encodeToString(out.toByteArray(),android.util.Base64.NO_WRAP));bm.recycle();}catch(Exception e){o.put("icon","");}
+    try{Drawable dr=r.loadIcon(pm);Bitmap bm=Bitmap.createBitmap(80,80,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bm);dr.setBounds(8,8,72,72);dr.draw(canvas);ByteArrayOutputStream out=new ByteArrayOutputStream();bm.compress(Bitmap.CompressFormat.PNG,100,out);o.put("icon","data:image/png;base64,"+android.util.Base64.encodeToString(out.toByteArray(),android.util.Base64.NO_WRAP));
+    Bitmap tinted=Bitmap.createBitmap(80,80,Bitmap.Config.ARGB_8888);Canvas tc=new Canvas(tinted);Paint gray=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);ColorMatrix desat=new ColorMatrix();desat.setSaturation(0);gray.setColorFilter(new ColorMatrixColorFilter(desat));tc.drawBitmap(bm,0,0,gray);
+    Paint grad=new Paint(Paint.ANTI_ALIAS_FLAG);grad.setShader(new LinearGradient(4,0,76,80,new int[]{Color.rgb(255,110,135),Color.rgb(225,28,65),Color.rgb(76,3,24)},new float[]{0f,.5f,1f},Shader.TileMode.CLAMP));grad.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.MULTIPLY));tc.drawRect(0,0,80,80,grad);grad.setXfermode(null);
+    // Retain the original alpha so transparent icon margins stay transparent.
+    Paint alpha=new Paint();alpha.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));tc.drawBitmap(bm,0,0,alpha);
+    ByteArrayOutputStream redOut=new ByteArrayOutputStream();tinted.compress(Bitmap.CompressFormat.PNG,100,redOut);o.put("redIcon","data:image/png;base64,"+android.util.Base64.encodeToString(redOut.toByteArray(),android.util.Base64.NO_WRAP));tinted.recycle();bm.recycle();}catch(Exception e){o.put("icon","");}
     array.put(o);next.put(id,c);
    }
    allowed.putAll(next);allowed.keySet().retainAll(next.keySet());appJson=array.toString();runOnUiThread(()->push());
@@ -64,18 +70,10 @@ public class MainActivity extends Activity {
  });}
  private final Handler statusHandler=new Handler(Looper.getMainLooper());
  private boolean foreground=false;
- private final Runnable statusTick=new Runnable(){public void run(){if(!foreground)return;sendStatus();statusHandler.postDelayed(this,10000);}};
- private void hideStatus(){
-  if(Build.VERSION.SDK_INT>=30){WindowInsetsController c=getWindow().getInsetsController();if(c!=null){c.hide(WindowInsets.Type.statusBars());c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);}}
-  else getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
- }
+ private final Runnable statusTick=new Runnable(){public void run(){if(!foreground)return;sendStatus();statusHandler.postDelayed(this,15000);}};
+ private void hideStatus(){if(Build.VERSION.SDK_INT>=30){WindowInsetsController c=getWindow().getInsetsController();if(c!=null){c.hide(WindowInsets.Type.statusBars());c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);}}else getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
  @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus)hideStatus();}
- private void sendStatus(){if(web==null)return;try{
-  JSONObject o=new JSONObject();BatteryManager bm=(BatteryManager)getSystemService(BATTERY_SERVICE);int level=bm==null?-1:bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);o.put("battery",level>=0&&level<=100?level:-1);o.put("charging",bm!=null&&bm.isCharging());
-  android.net.ConnectivityManager cm=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);android.net.NetworkCapabilities n=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());String network="Нет сети";
-  if(n!=null){if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI))network="Wi-Fi";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR))network="Моб. сеть";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET))network="Ethernet";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))network="VPN";else network="Сеть";}
-  o.put("network",network);web.evaluateJavascript("window.deviceStatus&&window.deviceStatus("+o+")",null);
- }catch(Exception ignored){}}
+ private void sendStatus(){if(web==null)return;try{JSONObject o=new JSONObject();BatteryManager bm=(BatteryManager)getSystemService(BATTERY_SERVICE);int level=bm==null?-1:bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);o.put("battery",level>=0&&level<=100?level:-1);o.put("charging",bm!=null&&bm.isCharging());android.net.ConnectivityManager cm=(android.net.ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);android.net.NetworkCapabilities n=cm==null?null:cm.getNetworkCapabilities(cm.getActiveNetwork());String network="Нет сети";if(n!=null){if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI))network="Wi-Fi";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR))network="Моб. сеть";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET))network="Ethernet";else if(n.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))network="VPN";else network="Сеть";}o.put("network",network);web.evaluateJavascript("window.deviceStatus&&window.deviceStatus("+o+")",null);}catch(Exception ignored){}}
  public class Bridge {
   @JavascriptInterface public void refresh(){loadApps();}
   @JavascriptInterface public void setHome(){runOnUiThread(()->{try{RoleManager r=getSystemService(RoleManager.class);if(r!=null&&r.isRoleAvailable(RoleManager.ROLE_HOME)&&!r.isRoleHeld(RoleManager.ROLE_HOME))startActivityForResult(r.createRequestRoleIntent(RoleManager.ROLE_HOME),42);else startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));}catch(Exception e){try{startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));}catch(Exception ignored){}}});}
@@ -89,7 +87,7 @@ public class MainActivity extends Activity {
   @JavascriptInterface public void appInfo(String id){runOnUiThread(()->{ComponentName c=allowed.get(id);if(c!=null)try{startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+c.getPackageName())));}catch(Exception ignored){}});}
  }
  @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==41&&fileCallback!=null){fileCallback.onReceiveValue(result==RESULT_OK?WebChromeClient.FileChooserParams.parseResult(result,data):null);fileCallback=null;}push();}
- @Override protected void onResume(){super.onResume();foreground=true;hideStatus();statusHandler.removeCallbacks(statusTick);statusHandler.post(statusTick);if(web!=null){web.onResume();push();web.evaluateJavascript("window.onHomeResume&&window.onHomeResume()",null);}}
+ @Override protected void onResume(){super.onResume();foreground=true;hideStatus();statusHandler.removeCallbacks(statusTick);statusHandler.post(statusTick);if(web!=null){web.onResume();web.evaluateJavascript("window.onHomeResume&&window.onHomeResume()",null);}}
  @Override protected void onPause(){foreground=false;statusHandler.removeCallbacks(statusTick);if(web!=null){web.evaluateJavascript("window.onHomePause&&window.onHomePause()",null);web.onPause();}super.onPause();}
  @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);web.evaluateJavascript("window.goHome&&window.goHome()",null);}
  @Override public void onBackPressed(){web.evaluateJavascript("window.handleBack&&window.handleBack()",null);}
