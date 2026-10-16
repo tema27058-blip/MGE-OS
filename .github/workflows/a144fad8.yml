@@ -1,4 +1,4 @@
-name: Build Mna Glass Preview
+name: Build Mna 2.2 Preview
 on:
   workflow_dispatch:
   push:
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mna-glass-${{ github.ref }}
+  group: mna-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   apk:
@@ -17,6 +17,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Regression test for pages
+        run: |
+          mkdir -p "$RUNNER_TEMP/page-tests"
+          javac -d "$RUNNER_TEMP/page-tests" app/src/main/java/com/mna/launcher/PagePolicy.java tests/PagePolicyTest.java
+          java -cp "$RUNNER_TEMP/page-tests" PagePolicyTest
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
@@ -36,21 +41,23 @@ jobs:
           if [ -n "$KEY_BASE64" ]; then
             printf '%s' "$KEY_BASE64" | base64 -d > ~/.android/debug.keystore
           fi
-      - name: Prepare reviewed native refinement
-        run: python3 tools/refine_ui.py
-      - name: Build and save full log
+      - name: Prepare native source
+        run: |
+          python3 tools/refine_ui.py
+          python3 tools/stability22.py
+      - name: Build APK
         shell: bash
         run: |
           set -o pipefail
           gradle --no-daemon --console=plain --stacktrace :app:assembleDebug 2>&1 | tee build-log.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: Mna-Glass-Preview-APK
+          name: Mna-2.2-Candidate-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Mna-Glass-build-log
+          name: Mna-2.2-build-log
           path: build-log.txt
           if-no-files-found: ignore
