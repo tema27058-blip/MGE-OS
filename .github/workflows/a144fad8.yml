@@ -50,4 +50,39 @@ jobs:
               -alias androiddebugkey \
               -keypass android \
               -keyalg RSA \
-              -keysize 20
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Locate project and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT=""
+          while IFS= read -r SETTINGS; do
+            DIR="$(dirname "$SETTINGS")"
+            if [ -f "$DIR/app/src/main/java/com/mna/launcher/MainActivity.java" ]; then
+              PROJECT="$DIR"
+              break
+            fi
+          done < <(find . -maxdepth 4 -name settings.gradle -type f)
+
+          if [ -z "$PROJECT" ]; then
+            echo "::error::Не найдены распакованные исходники Mna OS. Загрузите содержимое архива 2.0, а не ZIP."
+            exit 1
+          fi
+
+          echo "Building project: $PROJECT"
+          gradle --no-daemon --console=plain \
+            -p "$PROJECT" :app:assembleDebug
+
+          mkdir -p apk-output
+          cp "$PROJECT/app/build/outputs/apk/debug/app-debug.apk" \
+            apk-output/Mna-OS-2.0.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mna-OS-2.0-APK
+          path: apk-output/Mna-OS-2.0.apk
+          if-no-files-found: error
