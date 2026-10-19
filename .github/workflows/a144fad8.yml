@@ -1,4 +1,4 @@
-name: Build Mna OS 2.0
+name: Build MGE OS Glass APK
 
 on:
   workflow_dispatch:
@@ -18,6 +18,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - uses: android-actions/setup-android@v3
         with:
@@ -55,7 +59,10 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Locate project and build
+      - name: Verify glass add-on
+        run: node --check app/src/main/assets/mge-glass.js
+
+      - name: Install add-on and build
         shell: bash
         run: |
           set -euo pipefail
@@ -74,15 +81,16 @@ jobs:
           fi
 
           echo "Building project: $PROJECT"
+          python3 tools/install_glass_addon.py
           gradle --no-daemon --console=plain \
             -p "$PROJECT" :app:assembleDebug
 
           mkdir -p apk-output
           cp "$PROJECT/app/build/outputs/apk/debug/app-debug.apk" \
-            apk-output/Mna-OS-2.0.apk
+            apk-output/MGE-OS-Glass.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Mna-OS-2.0-APK
-          path: apk-output/Mna-OS-2.0.apk
+          name: MGE-OS-Glass-APK
+          path: apk-output/MGE-OS-Glass.apk
           if-no-files-found: error
